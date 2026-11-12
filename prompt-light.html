@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prompt Light — Full-Screen Teleprompter</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: Georgia, 'Times New Roman', serif;
+    background: #ffffff;
+    color: #111;
+    overflow: hidden;
+  }
+
+  /* ---------- Setup view ---------- */
+  #setup {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 18px 22px;
+    gap: 12px;
+    background: #fafafa;
+  }
+  #setup h1 { font-size: 22px; font-weight: normal; letter-spacing: .5px; }
+  #setup h1 span { color: #b8860b; }
+  #setup .hint { font-size: 13px; color: #555; font-family: Arial, sans-serif; line-height: 1.5; }
+  #setup .hint code { background: #eee; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+  #textInput {
+    flex: 1;
+    width: 100%;
+    font-family: Georgia, serif;
+    font-size: 17px;
+    line-height: 1.5;
+    padding: 14px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    resize: none;
+    background: #fff;
+  }
+  .settings {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px 26px;
+    align-items: center;
+    font-family: Arial, sans-serif;
+    font-size: 13px;
+    color: #333;
+  }
+  .settings label { display: flex; align-items: center; gap: 8px; }
+  .settings input[type="range"] { width: 130px; }
+  .settings select { font-size: 13px; padding: 3px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button {
+    font-family: Arial, sans-serif;
+    font-size: 14px;
+    padding: 9px 18px;
+    border-radius: 6px;
+    border: 1px solid #bbb;
+    background: #fff;
+    cursor: pointer;
+  }
+  button:hover { background: #f0f0f0; }
+  button.primary { background: #111; color: #fff; border-color: #111; font-size: 16px; padding: 11px 26px; }
+  button.primary:hover { background: #333; }
+  #fileInput { display: none; }
+
+  /* ---------- Prompt view ---------- */
+  #prompt { display: none; position: fixed; inset: 0; background: #ffffff; }
+  #viewport { position: absolute; inset: 0; overflow: hidden; }
+  #scroller { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }
+  #content {
+    max-width: 92%;
+    margin: 0 auto;
+    padding: 45vh 10px 60vh 10px;
+    font-size: 64px;
+    line-height: 1.45;
+    color: #111;
+    text-align: center;
+  }
+  #content.mirrored { transform: scaleX(-1); }
+  #content .line { min-height: 0.4em; }
+  #content .spacer { height: 0.9em; }
+  #content .tag {
+    display: inline-block;
+    margin: 0.7em 0 0.5em 0;
+    padding: 0.08em 0.5em;
+    border: 3px solid #111;
+    border-radius: 10px;
+    font-family: Arial, sans-serif;
+    font-weight: bold;
+    font-size: 0.62em;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  #content .tag.hit { background: #ffe97a; }
+
+  /* reading guide */
+  #guide {
+    position: absolute;
+    left: 0; right: 0;
+    top: 38%;
+    height: 0;
+    border-top: 2px dashed rgba(200,0,0,0.35);
+    pointer-events: none;
+  }
+  #guide::before {
+    content: "▶";
+    position: absolute;
+    left: 8px; top: -14px;
+    color: rgba(200,0,0,0.55);
+    font-size: 18px;
+  }
+
+  /* progress */
+  #progressWrap { position: absolute; top: 0; left: 0; right: 0; height: 5px; background: rgba(0,0,0,0.06); }
+  #progress { height: 100%; width: 0%; background: #b8860b; }
+
+  /* section banner */
+  #banner {
+    position: absolute;
+    top: 14px; left: 50%;
+    transform: translateX(-50%);
+    background: #111; color: #fff;
+    font-family: Arial, sans-serif;
+    font-size: 15px;
+    padding: 8px 18px;
+    border-radius: 20px;
+    display: none;
+    white-space: nowrap;
+    z-index: 30;
+  }
+
+  /* control bar (auto-hides) */
+  #controls {
+    position: absolute;
+    left: 50%; bottom: 16px;
+    transform: translateX(-50%);
+    display: flex; gap: 8px; align-items: center;
+    background: rgba(17,17,17,0.88);
+    padding: 8px 12px;
+    border-radius: 12px;
+    transition: opacity .4s;
+    z-index: 40;
+    font-family: Arial, sans-serif;
+  }
+  #controls.hidden { opacity: 0; pointer-events: none; }
+  #controls button {
+    background: #2a2a2a; color: #fff; border: 1px solid #444;
+    font-size: 14px; padding: 7px 13px; border-radius: 8px;
+  }
+  #controls button:hover { background: #3d3d3d; }
+  #controls .lbl { color: #bbb; font-size: 12px; }
+  #controls input[type="range"] { width: 110px; }
+  #controls #playBtn { min-width: 92px; background: #b8860b; border-color: #b8860b; color: #111; font-weight: bold; }
+  #controls #playBtn:hover { background: #d4a017; }
+</style>
+</head>
+<body>
+
+<!-- ================= SETUP ================= -->
+<div id="setup">
+  <h1>Prompt <span>Light</span> — full-screen teleprompter</h1>
+  <div class="hint">
+    Paste your script below (or open a .txt / .md file). Multi-page documents just flow one after another — page breaks are ignored.
+    Mark sections with a tag line like <code>[VERSE 1]</code>, <code>[CHORUS]</code>, or a <code>## Heading</code> — the prompter
+    <b>pauses when a tag reaches the red guide line</b>, so you can take your break, then hit Space to roll on.
+    The screen is full white on purpose: it doubles as your camera light.
+  </div>
+  <textarea id="textInput" placeholder="Paste your script here…
+
+[INTRO]
+Your lines go here. Big, easy to read, scrolling smooth.
+
+[VERSE 1]
+Next section starts with a tag line in brackets…"></textarea>
+  <div class="settings">
+    <label>Font size <input type="range" id="fontSize" min="32" max="120" value="64"> <span id="fontSizeVal">64px</span></label>
+    <label>Scroll speed <input type="range" id="speed" min="1" max="100" value="32"> <span id="speedVal"></span></label>
+    <label>Pause at sections
+      <select id="pauseMode">
+        <option value="manual" selected>Until I press Space</option>
+        <option value="3">3 seconds</option>
+        <option value="5">5 seconds</option>
+        <option value="10">10 seconds</option>
+        <option value="off">Don't pause</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="mirror"> Mirror text (for prompter glass)</label>
+    <label><input type="checkbox" id="showGuide" checked> Show guide line</label>
+  </div>
+  <div class="row">
+    <button class="primary" id="startBtn">▶ Start Prompting</button>
+    <button id="openFileBtn">Open .txt / .md file…</button>
+    <input type="file" id="fileInput" accept=".txt,.md,.text">
+    <button id="clearBtn">Clear</button>
+  </div>
+  <div class="hint">Keys while prompting: <b>Space</b> play / pause / resume &nbsp;•&nbsp; <b>↑ ↓</b> speed &nbsp;•&nbsp; <b>← →</b> nudge &nbsp;•&nbsp; <b>R</b> restart &nbsp;•&nbsp; <b>F</b> full screen &nbsp;•&nbsp; <b>Esc</b> back to edit</div>
+</div>
+
+<!-- ================= PROMPT ================= -->
+<div id="prompt">
+  <div id="viewport">
+    <div id="scroller"><div id="content"></div></div>
+    <div id="guide"></div>
+  </div>
+  <div id="progressWrap"><div id="progress"></div></div>
+  <div id="banner"></div>
+  <div id="controls">
+    <button id="backBtn" title="Back to edit (Esc)">✎ Edit</button>
+    <button id="playBtn">⏸ Pause</button>
+    <button id="restartBtn" title="Restart (R)">⏮ Top</button>
+    <span class="lbl">Speed</span>
+    <input type="range" id="speedLive" min="1" max="100" value="32">
+    <button id="slowerBtn">−</button>
+    <button id="fasterBtn">+</button>
+    <button id="fsBtn" title="Full screen (F)">⛶ Full</button>
+    <span class="lbl" id="sectionLbl"></span>
+  </div>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+
+  var setupEl = $('setup'), promptEl = $('prompt');
+  var contentEl = $('content'), scrollerEl = $('scroller'), viewportEl = $('viewport');
+  var bannerEl = $('banner'), controlsEl = $('controls'), progressEl = $('progress');
+  var playBtn = $('playBtn'), sectionLbl = $('sectionLbl'), guideEl = $('guide');
+
+  var tags = [];        // {el, triggerPos, label, consumed}
+  var pos = 0;          // current scroll offset (px of content scrolled past top)
+  var playing = false;
+  var tagPaused = false;
+  var rafId = null, lastTs = null;
+  var autoTimer = null;
+  var maxPos = 0;
+  var hideTimer = null;
+
+  function speedPxPerSec() {
+    var v = parseFloat($('speed').value); // 1..100
+    return 14 + (v / 100) * 300;           // ~14 .. 314 px/s
+  }
+  function refreshSpeedLabel() {
+    $('speedVal').textContent = Math.round(speedPxPerSec()) + ' px/s';
+  }
+  $('speed').addEventListener('input', function () {
+    $('speedLive').value = this.value; refreshSpeedLabel();
+  });
+  $('speedLive').addEventListener('input', function () {
+    $('speed').value = this.value; refreshSpeedLabel();
+  });
+  $('fontSize').addEventListener('input', function () {
+    $('fontSizeVal').textContent = this.value + 'px';
+  });
+  refreshSpeedLabel();
+
+  /* ---------- file open ---------- */
+  $('openFileBtn').addEventListener('click', function () { $('fileInput').click(); });
+  $('fileInput').addEventListener('change', function () {
+    var f = this.files && this.files[0];
+    if (!f) return;
+    var r = new FileReader();
+    r.onload = function () { $('textInput').value = String(r.result || ''); };
+    r.readAsText(f);
+    this.value = '';
+  });
+  $('clearBtn').addEventListener('click', function () { $('textInput').value = ''; $('textInput').focus(); });
+
+  /* ---------- build prompt ---------- */
+  function isTagLine(line) {
+    var t = line.trim();
+    if (/^\[.+\]$/.test(t)) return t.replace(/^\[|\]$/g, '').trim();
+    if (/^#{1,6}\s+/.test(t)) return t.replace(/^#{1,6}\s+/, '').trim();
+    return null;
+  }
+
+  function buildContent(raw) {
+    // Multi-page docs: form feeds (page breaks) become plain line breaks so pages flow back to back.
+    var text = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\f/g, '\n');
+    var lines = text.split('\n');
+    contentEl.innerHTML = '';
+    tags = [];
+    lines.forEach(function (line) {
+      var label = isTagLine(line);
+      if (label !== null) {
+        var wrap = document.createElement('div');
+        var span = document.createElement('span');
+        span.className = 'tag';
+        span.textContent = label;
+        wrap.appendChild(span);
+        contentEl.appendChild(wrap);
+        tags.push({ el: span, label: label, triggerPos: 0, consumed: false });
+      } else if (line.trim() === '') {
+        var sp = document.createElement('div');
+        sp.className = 'spacer';
+        contentEl.appendChild(sp);
+      } else {
+        var d = document.createElement('div');
+        d.className = 'line';
+        d.textContent = line;
+        contentEl.appendChild(d);
+      }
+    });
+  }
+
+  function measure() {
+    var guideY = viewportEl.clientHeight * 0.38;
+    tags.forEach(function (t) {
+      t.triggerPos = t.el.offsetTop - guideY;
+    });
+    maxPos = Math.max(0, contentEl.scrollHeight - viewportEl.clientHeight * 0.55);
+  }
+
+  function applyPos() {
+    scrollerEl.style.transform = 'translateY(' + (-pos) + 'px)';
+    progressEl.style.width = (maxPos > 0 ? Math.min(100, (pos / maxPos) * 100) : 0) + '%';
+    // current section label
+    var cur = 'Start';
+    tags.forEach(function (t) { if (t.triggerPos <= pos + 2) cur = t.label; });
+    sectionLbl.textContent = tags.length ? ('§ ' + cur) : '';
+  }
+
+  function showBanner(msg) { bannerEl.textContent = msg; bannerEl.style.display = 'block'; }
+  function hideBanner() { bannerEl.style.display = 'none'; }
+
+  function clearAuto() { if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; } }
+
+  function pauseAtTag(t) {
+    playing = false; tagPaused = true;
+    pos = Math.max(0, t.triggerPos);
+    t.consumed = true;
+    t.el.classList.add('hit');
+    applyPos();
+    playBtn.textContent = '▶ Resume';
+    var idx = tags.indexOf(t) + 1;
+    showBanner('⏸ ' + t.label + ' — section ' + idx + ' of ' + tags.length + '  •  Space to continue');
+    wakeControls();
+    var mode = $('pauseMode').value;
+    if (mode !== 'manual' && mode !== 'off') {
+      autoTimer = setTimeout(function () { if (tagPaused) resume(); }, parseInt(mode, 10) * 1000);
+    }
+  }
+
+  function resume() {
+    clearAuto();
+    hideBanner();
+    tagPaused = false;
+    playing = true;
+    playBtn.textContent = '⏸ Pause';
+    lastTs = null;
+  }
+
+  function togglePlay() {
+    if (tagPaused) { resume(); return; }
+    playing = !playing;
+    lastTs = null;
+    playBtn.textContent = playing ? '⏸ Pause' : '▶ Play';
+    if (playing) hideBanner();
+  }
+
+  function step(ts) {
+    if (lastTs === null) lastTs = ts;
+    var dt = Math.min(0.05, (ts - lastTs) / 1000);
+    lastTs = ts;
+    if (playing && !tagPaused) {
+      var next = pos + speedPxPerSec() * dt;
+      if ($('pauseMode').value !== 'off') {
+        for (var i = 0; i < tags.length; i++) {
+          var t = tags[i];
+          if (!t.consumed && t.triggerPos > pos && t.triggerPos <= next) {
+            pauseAtTag(t);
+            break;
+          }
+        }
+      }
+      if (!tagPaused) {
+        pos = Math.min(next, maxPos);
+        if (pos >= maxPos) {
+          playing = false;
+          playBtn.textContent = '▶ Play';
+          showBanner('— End of script —  R to restart, Esc to edit');
+        }
+        applyPos();
+      }
+    }
+    rafId = requestAnimationFrame(step);
+  }
+
+  function startPrompt() {
+    var raw = $('textInput').value;
+    if (!raw.trim()) { alert('Paste some text first.'); return; }
+    buildContent(raw);
+    contentEl.style.fontSize = $('fontSize').value + 'px';
+    contentEl.classList.toggle('mirrored', $('mirror').checked);
+    guideEl.style.display = $('showGuide').checked ? 'block' : 'none';
+    setupEl.style.display = 'none';
+    promptEl.style.display = 'block';
+    pos = 0;
+    tags.forEach(function (t) { t.consumed = false; t.el.classList.remove('hit'); });
+    measure();
+    applyPos();
+    hideBanner();
+    playing = true; tagPaused = false;
+    playBtn.textContent = '⏸ Pause';
+    lastTs = null;
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(step);
+    wakeControls();
+  }
+
+  function stopPrompt() {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = null;
+    playing = false; tagPaused = false;
+    clearAuto();
+    promptEl.style.display = 'none';
+    setupEl.style.display = 'flex';
+    if (document.fullscreenElement) document.exitFullscreen();
+  }
+
+  function restart() {
+    pos = 0;
+    tags.forEach(function (t) { t.consumed = false; t.el.classList.remove('hit'); });
+    hideBanner();
+    applyPos();
+    playing = true; tagPaused = false;
+    playBtn.textContent = '⏸ Pause';
+    lastTs = null;
+  }
+
+  function nudge(delta) {
+    clearAuto();
+    pos = Math.max(0, Math.min(maxPos, pos + delta));
+    if (delta < 0) {
+      tags.forEach(function (t) {
+        if (t.triggerPos > pos) { t.consumed = false; t.el.classList.remove('hit'); }
+      });
+    }
+    tagPaused = false; hideBanner();
+    applyPos();
+  }
+
+  /* ---------- controls auto-hide ---------- */
+  function wakeControls() {
+    controlsEl.classList.remove('hidden');
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = setTimeout(function () { controlsEl.classList.add('hidden'); }, 2800);
+  }
+  promptEl.addEventListener('mousemove', wakeControls);
+  promptEl.addEventListener('touchstart', wakeControls, { passive: true });
+
+  /* ---------- buttons ---------- */
+  $('startBtn').addEventListener('click', startPrompt);
+  $('backBtn').addEventListener('click', stopPrompt);
+  playBtn.addEventListener('click', togglePlay);
+  $('restartBtn').addEventListener('click', restart);
+  $('slowerBtn').addEventListener('click', function () {
+    var s = $('speedLive'); s.value = Math.max(1, parseInt(s.value, 10) - 8);
+    s.dispatchEvent(new Event('input')); wakeControls();
+  });
+  $('fasterBtn').addEventListener('click', function () {
+    var s = $('speedLive'); s.value = Math.min(100, parseInt(s.value, 10) + 8);
+    s.dispatchEvent(new Event('input')); wakeControls();
+  });
+  function toggleFS() {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
+  }
+  $('fsBtn').addEventListener('click', toggleFS);
+  viewportEl.addEventListener('click', function (e) {
+    if (e.target.closest('#controls')) return;
+    togglePlay();
+  });
+
+  /* ---------- keys ---------- */
+  document.addEventListener('keydown', function (e) {
+    if (promptEl.style.display !== 'block') {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) startPrompt();
+      return;
+    }
+    switch (e.key) {
+      case ' ': e.preventDefault(); togglePlay(); wakeControls(); break;
+      case 'ArrowUp': e.preventDefault(); $('fasterBtn').click(); break;
+      case 'ArrowDown': e.preventDefault(); $('slowerBtn').click(); break;
+      case 'ArrowRight': e.preventDefault(); nudge(160); wakeControls(); break;
+      case 'ArrowLeft': e.preventDefault(); nudge(-160); wakeControls(); break;
+      case 'r': case 'R': restart(); break;
+      case 'f': case 'F': toggleFS(); break;
+      case 'Escape': stopPrompt(); break;
+    }
+  });
+
+  window.addEventListener('resize', function () {
+    if (promptEl.style.display === 'block') { measure(); applyPos(); }
+  });
+})();
+</script>
+</body>
+</html>
